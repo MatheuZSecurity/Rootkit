@@ -24,7 +24,7 @@ MODULE_AUTHOR("Trevohack");
 MODULE_DESCRIPTION("Hook read, kill and mount to protect content of a file"); 
 MODULE_VERSION("0.02");
 
-#define TARGET_FILE "/tmp/data.txt"
+#define TARGET_FILE "/root/data.txt" 
 #define DATA "Hello World\n"
 #define DATA_LEN (strlen(DATA))
 
