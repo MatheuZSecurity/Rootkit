@@ -217,5 +217,5 @@ static void trev_exit(void)
     fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
 }
 
-module_init(rootkit_init);
-module_exit(rootkit_exit);
+module_init(trev_init);
+module_exit(trev_exit);
