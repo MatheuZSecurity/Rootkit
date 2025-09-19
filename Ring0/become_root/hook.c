@@ -102,6 +102,7 @@ static int __init mangekyou_init(void){
                 return error;
         }
         if ( try_module_get(THIS_MODULE) ){
+                pr_info("Increase refrence count");
         }
         else {
                 THIS_MODULE->state=MODULE_STATE_GOING;
