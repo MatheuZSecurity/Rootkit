@@ -8,7 +8,7 @@
 This kernel module demonstrates how to use ftrace hooking to intercept and modify the behavior of Linux system calls.
 It hooks the following syscalls:
 
-- read → Alters the contents of a specific file (/tmp/data.txt)
+- write → Alters the contents of a specific file (/root/data.txt)
 - mount → Blocks mounting of certain paths
 - kill → Provides hidden commands for toggling module visibility and privilege escalation
 
@@ -20,9 +20,9 @@ kill -44 0 # hides or shows the kit
 kill -45 0 # sets root
 ```
 
- ### The Read Hook 
+ ### The Write Hook 
 
- - The read hook will protect the content of the file under the constant `TARGET_FILE` therefore, preventing modifications to this file even by root user
+ - The write hook will protect the content of the file under the constant `TARGET_FILE` therefore, preventing modifications to this file even by root user
  - The static content of the file is under `DATA` constant hence, only that specific data will be inside that file
 ```bash
 cat /root/data.txt
